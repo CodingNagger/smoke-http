@@ -20,7 +20,7 @@ import Foundation
 /**
  HTTP Request Input that only has a query.
  */
-public struct QueryHTTPRequestInput<QueryType: Encodable> : HTTPRequestInputProtocol {
+public struct QueryHTTPRequestInput<QueryType: Encodable>: HTTPRequestInputProtocol {
     public let queryEncodable: QueryType?
     public let pathEncodable: QueryType?
     public let bodyEncodable: QueryType?
