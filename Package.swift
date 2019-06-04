@@ -1,4 +1,4 @@
-// swift-tools-version:4.1
+// swift-tools-version:5.0
 //
 // Copyright 2018-2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 //
@@ -35,14 +35,14 @@ let package = Package(
             targets: ["ShapeCoding"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-nio.git", from: "1.0.0"),
-        .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "1.0.0"),
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.0.0"),
+        .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.0.0"),
         .package(url: "https://github.com/IBM-Swift/LoggerAPI.git", .upToNextMajor(from: "1.0.0")),
     ],
     targets: [
         .target(
             name: "SmokeHTTPClient",
-            dependencies: ["LoggerAPI", "NIO", "NIOHTTP1", "NIOFoundationCompat", "NIOOpenSSL"]),
+            dependencies: ["LoggerAPI", "NIO", "NIOHTTP1", "NIOFoundationCompat", "NIOSSL"]),
         .target(
             name: "QueryCoding",
             dependencies: ["ShapeCoding"]),

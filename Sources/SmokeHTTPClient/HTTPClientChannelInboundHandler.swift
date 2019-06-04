@@ -18,7 +18,7 @@
 import Foundation
 import NIO
 import NIOHTTP1
-import NIOOpenSSL
+import NIOSSL
 import NIOTLS
 import NIOFoundationCompat
 import LoggerAPI
@@ -57,7 +57,7 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
     public var partialBody: Data?
 
     /// A completion handler to pass any recieved response to.
-    private let completion: (HTTPResult<HTTPResponseComponents>) -> ()
+    private let completion: (Result<HTTPResponseComponents, Swift.Error>) -> ()
     /// A function that provides an Error based on the payload provided.
     private let errorProvider: (HTTPResponseHead, HTTPResponseComponents) throws -> Error
     /// Delegate that provides client-specific logic
@@ -83,7 +83,7 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
          bodyData: Data,
          additionalHeaders: [(String, String)],
          errorProvider: @escaping (HTTPResponseHead, HTTPResponseComponents) throws -> Error,
-         completion: @escaping (HTTPResult<HTTPResponseComponents>) -> (),
+         completion: @escaping (Result<HTTPResponseComponents, Swift.Error>) -> (),
          channelInboundHandlerDelegate: HTTPClientChannelInboundHandlerDelegate) {
         self.contentType = contentType
         self.endpointUrl = endpointUrl
@@ -99,7 +99,7 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
     /**
      Called when data has been received from the channel.
      */
-    public func channelRead(ctx: ChannelHandlerContext, data: NIOAny) {
+    public func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let responsePart = self.unwrapInboundIn(data)
 
         switch responsePart {
@@ -126,7 +126,7 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
             Log.verbose("Response end received.")
             // the head and all possible body parts have been received,
             // handle this response
-            handleCompleteResponse(context: ctx, bodyData: partialBody)
+            handleCompleteResponse(context: context, bodyData: partialBody)
             partialBody = nil
         }
     }
@@ -142,11 +142,11 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
     /*
      Handles when the response has been completely received.
      */
-    func handleCompleteResponse(context ctx: ChannelHandlerContext, bodyData: Data?) {
+    func handleCompleteResponse(context: ChannelHandlerContext, bodyData: Data?) {
         // always close the channel context after the processing in this method
         defer {
             Log.verbose("Closing channel on complete response.")
-            ctx.close(promise: nil)
+            context.close(promise: nil)
             Log.verbose("Channel closed on complete response.")
         }
 
@@ -159,7 +159,7 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
             Log.error("Response head was not received")
 
             // complete with this error
-            completion(.error(error))
+            completion(.failure(error))
             return
         }
         
@@ -186,13 +186,13 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
         // if the response status is ok
         if isSuccess {
             // complete with the response data (potentially empty)
-            completion(.response(responseComponents))
+            completion(.success(responseComponents))
             return
         }
 
         // Handle client delegated errors
         if let error = delegate.handleErrorResponses(responseHead: responseHead, responseBodyData: bodyData) {
-            completion(.error(error))
+            completion(.failure(error))
             return
         }
 
@@ -206,23 +206,23 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
         }
 
         // complete with the error
-        completion(.error(responseError))
+        completion(.failure(responseError))
     }
 
     /**
      Called when notifying about a connection error.
      */
-    public func errorCaught(ctx: ChannelHandlerContext, error: Error) {
+    public func errorCaught(context: ChannelHandlerContext, error: Error) {
         Log.verbose("Error received from HTTP connection: \(String(describing: error))")
 
         // close the channel
-        ctx.close(promise: nil)
+        context.close(promise: nil)
     }
 
     /**
      Called when the channel becomes active.
      */
-    public func channelActive(ctx: ChannelHandlerContext) {
+    public func channelActive(context: ChannelHandlerContext) {
         Log.verbose("Preparing request on channel active.")
         var headers = delegate.addClientSpecificHeaders(handler: self)
 
@@ -240,14 +240,14 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
         httpRequestHead.headers = HTTPHeaders(headers)
 
         // copy the body data to a ByteBuffer
-        var buffer = ctx.channel.allocator.buffer(capacity: bodyData.count)
+        var buffer = context.channel.allocator.buffer(capacity: bodyData.count)
         let array = [UInt8](bodyData)
-        buffer.write(bytes: array)
+        buffer.writeBytes(array)
 
         // Send the request on the channel.
-        ctx.write(self.wrapOutboundOut(.head(httpRequestHead)), promise: nil)
-        ctx.write(self.wrapOutboundOut(.body(.byteBuffer(buffer))), promise: nil)
-        ctx.writeAndFlush(self.wrapOutboundOut(.end(nil)), promise: nil)
+        context.write(self.wrapOutboundOut(.head(httpRequestHead)), promise: nil)
+        context.write(self.wrapOutboundOut(.body(.byteBuffer(buffer))), promise: nil)
+        context.writeAndFlush(self.wrapOutboundOut(.end(nil)), promise: nil)
         Log.verbose("Request prepared on channel active.")
     }
 }

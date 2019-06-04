@@ -18,7 +18,7 @@
 import Foundation
 import NIO
 import NIOHTTP1
-import NIOOpenSSL
+import NIOSSL
 import NIOTLS
 import LoggerAPI
 
@@ -35,13 +35,13 @@ public extension HTTPClient {
      - completion: Completion handler called with an error if one occurs or nil otherwise.
      - handlerDelegate: the delegate used to customize the request's channel handler.
      */
-    public func executeAsyncWithoutOutput<InputType>(
+    func executeAsyncWithoutOutput<InputType>(
         endpointOverride: URL? = nil,
         endpointPath: String,
         httpMethod: HTTPMethod,
         input: InputType,
         completion: @escaping (Error?) -> (),
-        handlerDelegate: HTTPClientChannelInboundHandlerDelegate) throws -> Channel
+        handlerDelegate: HTTPClientChannelInboundHandlerDelegate) throws -> EventLoopFuture<Channel>
         where InputType: HTTPRequestInputProtocol {
             return try executeAsyncWithoutOutput(
                 endpointOverride: endpointOverride,
@@ -64,27 +64,27 @@ public extension HTTPClient {
      - asyncResponseInvocationStrategy: The invocation strategy for the response from this request.
      - handlerDelegate: the delegate used to customize the request's channel handler.
      */
-    public func executeAsyncWithoutOutput<InputType, InvocationStrategyType>(
+    func executeAsyncWithoutOutput<InputType, InvocationStrategyType>(
         endpointOverride: URL? = nil,
         endpointPath: String,
         httpMethod: HTTPMethod,
         input: InputType,
         completion: @escaping (Error?) -> (),
         asyncResponseInvocationStrategy: InvocationStrategyType,
-        handlerDelegate: HTTPClientChannelInboundHandlerDelegate) throws -> Channel
+        handlerDelegate: HTTPClientChannelInboundHandlerDelegate) throws -> EventLoopFuture<Channel>
         where InputType: HTTPRequestInputProtocol, InvocationStrategyType: AsyncResponseInvocationStrategy,
         InvocationStrategyType.OutputType == Error? {
             
             var hasComplete = false
             // create a wrapping completion handler to pass to the ChannelInboundHandler
-            let wrappingCompletion: (HTTPResult<HTTPResponseComponents>) -> () = { (rawResult) in
+            let wrappingCompletion: (Result<HTTPResponseComponents, Swift.Error>) -> () = { (rawResult) in
                 let result: Error?
                 
                 switch rawResult {
-                case .error(let error):
+                case .failure(let error):
                     // its an error, complete with this error
                     result = error
-                case .response:
+                case .success:
                     // its a successful completion, complete with an empty error.
                     result = nil
                 }
@@ -94,20 +94,28 @@ public extension HTTPClient {
             }
             
             // submit the asynchronous request
-            let channel = try executeAsync(endpointOverride: endpointOverride,
-                                           endpointPath: endpointPath,
-                                           httpMethod: httpMethod,
-                                           input: input,
-                                           completion: wrappingCompletion,
-                                           handlerDelegate: handlerDelegate)
+            let channelFuture = try executeAsync(endpointOverride: endpointOverride,
+                                                 endpointPath: endpointPath,
+                                                 httpMethod: httpMethod,
+                                                 input: input,
+                                                 completion: wrappingCompletion,
+                                                 handlerDelegate: handlerDelegate)
             
-            channel.closeFuture.whenComplete {
-                // if this channel is being closed and no response has been recorded
-                if !hasComplete {
-                    completion(HTTPClient.unexpectedClosureType)
+            channelFuture.whenComplete { result in
+                switch result {
+                case .success(let channel):
+                    channel.closeFuture.whenComplete { _ in
+                        // if this channel is being closed and no response has been recorded
+                        if !hasComplete {
+                            completion(HTTPClient.unexpectedClosureType)
+                        }
+                    }
+                case .failure(let error):
+                    // there was an issue creating the channel
+                    completion(error)
                 }
             }
             
-            return channel
+            return channelFuture
     }
 }

@@ -18,7 +18,7 @@
 import Foundation
 import NIO
 import NIOHTTP1
-import NIOOpenSSL
+import NIOSSL
 import NIOTLS
 import LoggerAPI
 
@@ -35,13 +35,13 @@ public extension HTTPClient {
      - completion: Completion handler called with the response body or any error.
      - handlerDelegate: the delegate used to customize the request's channel handler.
      */
-    public func executeAsyncWithOutput<InputType, OutputType>(
+    func executeAsyncWithOutput<InputType, OutputType>(
             endpointOverride: URL? = nil,
             endpointPath: String,
             httpMethod: HTTPMethod,
             input: InputType,
-            completion: @escaping (HTTPResult<OutputType>) -> (),
-            handlerDelegate: HTTPClientChannelInboundHandlerDelegate) throws -> Channel
+            completion: @escaping (Result<OutputType, Swift.Error>) -> (),
+            handlerDelegate: HTTPClientChannelInboundHandlerDelegate) throws -> EventLoopFuture<Channel>
         where InputType: HTTPRequestInputProtocol, OutputType: HTTPResponseOutputProtocol {
             return try executeAsyncWithOutput(
                 endpointOverride: endpointOverride,
@@ -49,7 +49,7 @@ public extension HTTPClient {
                 httpMethod: httpMethod,
                 input: input,
                 completion: completion,
-                asyncResponseInvocationStrategy: GlobalDispatchQueueAsyncResponseInvocationStrategy<HTTPResult<OutputType>>(),
+                asyncResponseInvocationStrategy: GlobalDispatchQueueAsyncResponseInvocationStrategy<Result<OutputType, Swift.Error>>(),
                 handlerDelegate: handlerDelegate)
     }
 
@@ -64,30 +64,30 @@ public extension HTTPClient {
      - asyncResponseInvocationStrategy: The invocation strategy for the response from this request.
      - handlerDelegate: the delegate used to customize the request's channel handler.
      */
-    public func executeAsyncWithOutput<InputType, OutputType, InvocationStrategyType>(
+    func executeAsyncWithOutput<InputType, OutputType, InvocationStrategyType>(
             endpointOverride: URL? = nil,
             endpointPath: String,
             httpMethod: HTTPMethod,
             input: InputType,
-            completion: @escaping (HTTPResult<OutputType>) -> (),
+            completion: @escaping (Result<OutputType, Swift.Error>) -> (),
             asyncResponseInvocationStrategy: InvocationStrategyType,
-            handlerDelegate: HTTPClientChannelInboundHandlerDelegate) throws -> Channel
+            handlerDelegate: HTTPClientChannelInboundHandlerDelegate) throws -> EventLoopFuture<Channel>
             where InputType: HTTPRequestInputProtocol, InvocationStrategyType: AsyncResponseInvocationStrategy,
-        InvocationStrategyType.OutputType == HTTPResult<OutputType>,
+        InvocationStrategyType.OutputType == Result<OutputType, Swift.Error>,
         OutputType: HTTPResponseOutputProtocol {
 
         var hasComplete = false
         let requestDelegate = clientDelegate
         // create a wrapping completion handler to pass to the ChannelInboundHandler
         // that will decode the returned body into the desired decodable type.
-        let wrappingCompletion: (HTTPResult<HTTPResponseComponents>) -> () = { (rawResult) in
-            let result: HTTPResult<OutputType>
+        let wrappingCompletion: (Result<HTTPResponseComponents, Swift.Error>) -> () = { (rawResult) in
+            let result: Result<OutputType, Swift.Error>
 
             switch rawResult {
-            case .error(let error):
+            case .failure(let error):
                 // its an error; complete with the provided error
-                result = .error(error)
-            case .response(let response):
+                result = .failure(error)
+            case .success(let response):
                 do {
                     // decode the provided body into the desired type
                     let output: OutputType = try requestDelegate.decodeOutput(
@@ -95,10 +95,10 @@ public extension HTTPClient {
                         headers: response.headers)
 
                     // complete with the decoded type
-                    result = .response(output)
+                    result = .success(output)
                 } catch {
                     // if there was a decoding error, complete with that error
-                    result = .error(error)
+                    result = .failure(error)
                 }
             }
 
@@ -107,20 +107,28 @@ public extension HTTPClient {
         }
 
         // submit the asynchronous request
-        let channel = try executeAsync(endpointOverride: endpointOverride,
-                                       endpointPath: endpointPath,
-                                       httpMethod: httpMethod,
-                                       input: input,
-                                       completion: wrappingCompletion,
-                                       handlerDelegate: handlerDelegate)
-
-        channel.closeFuture.whenComplete {
-            // if this channel is being closed and no response has been recorded
-            if !hasComplete {
-                completion(.error(HTTPClient.unexpectedClosureType))
+        let channelFuture = try executeAsync(endpointOverride: endpointOverride,
+                                             endpointPath: endpointPath,
+                                             httpMethod: httpMethod,
+                                             input: input,
+                                             completion: wrappingCompletion,
+                                             handlerDelegate: handlerDelegate)
+            
+        channelFuture.whenComplete { result in
+            switch result {
+            case .success(let channel):
+                channel.closeFuture.whenComplete { _ in
+                    // if this channel is being closed and no response has been recorded
+                    if !hasComplete {
+                        completion(.failure(HTTPClient.unexpectedClosureType))
+                    }
+                }
+            case .failure(let error):
+                // there was an issue creating the channel
+                completion(.failure(error))
             }
         }
 
-        return channel
+        return channelFuture
     }
 }
