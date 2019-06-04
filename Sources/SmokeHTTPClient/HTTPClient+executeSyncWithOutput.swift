@@ -20,7 +20,10 @@ import NIO
 import NIOHTTP1
 import NIOSSL
 import NIOTLS
-import LoggerAPI
+import Logging
+
+private let logger = Logger(label:
+    "com.amazon.SmokeHTTPClient.HTTPClient+executeSyncWithOutput")
 
 public extension HTTPClient {
     /**
@@ -78,14 +81,14 @@ public extension HTTPClient {
                 }
             }
             
-            Log.verbose("Waiting for response from \(endpointOverride?.host ?? endpointHostName) ...")
+            logger.debug("Waiting for response from \(endpointOverride?.host ?? endpointHostName) ...")
             completedSemaphore.wait()
             
             guard let result = responseResult else {
                 throw HTTPError.connectionError("Http request was closed without returning a response.")
             }
             
-            Log.verbose("Got response from \(endpointOverride?.host ?? endpointHostName) - response received: \(result)")
+            logger.debug("Got response from \(endpointOverride?.host ?? endpointHostName) - response received: \(result)")
             
             switch result {
             case .failure(let error):

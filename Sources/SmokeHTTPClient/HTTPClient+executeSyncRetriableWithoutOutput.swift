@@ -20,7 +20,10 @@ import NIO
 import NIOHTTP1
 import NIOSSL
 import NIOTLS
-import LoggerAPI
+import Logging
+
+private let logger = Logger(label:
+    "com.amazon.SmokeHTTPClient.HTTPClient+executeSyncRetriableWithoutOutput")
 
 private extension Int {
     var milliFromMicroSeconds: Int {
@@ -84,16 +87,15 @@ public extension HTTPClient {
                 let currentRetriesRemaining = retriesRemaining
                 retriesRemaining -= 1
                 
-                Log.debug("Request failed with error: \(error). Remaining retries: \(currentRetriesRemaining). "
-                        + "Retrying in \(retryInterval) ms.")
+                logger.debug("Request failed with error: \(error). Remaining retries: \(currentRetriesRemaining). Retrying in \(retryInterval) ms.")
                 usleep(useconds_t(retryInterval.milliFromMicroSeconds))
-                Log.debug("Reattempting request due to remaining retries: \(currentRetriesRemaining)")
+                logger.debug("Reattempting request due to remaining retries: \(currentRetriesRemaining)")
                 return try executeSyncWithoutOutput()
             } else {
                 if !shouldRetryOnError {
-                    Log.debug("Request not retried due to error returned: \(error)")
+                    logger.debug("Request not retried due to error returned: \(error)")
                 } else {
-                    Log.debug("Request not retried due to maximum retries: \(retryConfiguration.numRetries)")
+                    logger.debug("Request not retried due to maximum retries: \(retryConfiguration.numRetries)")
                 }
                 
                 throw error

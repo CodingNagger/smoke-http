@@ -20,7 +20,9 @@ import NIO
 import NIOHTTP1
 import NIOSSL
 import NIOTLS
-import LoggerAPI
+import Logging
+
+private let logger = Logger(label: "com.amazon.SmokeHTTPClient.HTTPClient")
 
 public class HTTPClient {
     /// The server hostname to contact for requests from this client.
@@ -115,7 +117,7 @@ public class HTTPClient {
      */
     deinit {
         guard isClosed() else {
-            return Log.error("HTTPClient was not closed properly prior to de-initialization.")
+            return logger.error("HTTPClient was not closed properly prior to de-initialization.")
         }
     }
     
@@ -200,7 +202,7 @@ public class HTTPClient {
             throw HTTPError.invalidRequest("Request endpoint '\(endpoint)' not valid URL.")
         }
 
-        Log.verbose("Sending \(httpMethod) request to endpoint: \(endpoint) at path: \(sendPath).")
+        logger.debug("Sending \(httpMethod) request to endpoint: \(endpoint) at path: \(sendPath).")
 
         let handler = HTTPClientChannelInboundHandler(contentType: contentType,
                                                       endpointUrl: url,

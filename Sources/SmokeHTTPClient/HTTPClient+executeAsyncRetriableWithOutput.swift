@@ -20,7 +20,10 @@ import NIO
 import NIOHTTP1
 import NIOSSL
 import NIOTLS
-import LoggerAPI
+import Logging
+
+private let logger = Logger(label:
+    "com.amazon.SmokeHTTPClient.HTTPClient+executeAsyncRetriableWithOutput")
 
 public extension HTTPClient {
     /**
@@ -88,11 +91,10 @@ public extension HTTPClient {
                     let currentRetriesRemaining = retriesRemaining
                     retriesRemaining -= 1
                     
-                    Log.warning("Request failed with error: \(error). Remaining retries: \(currentRetriesRemaining). "
-                        + "Retrying in \(retryInterval) ms.")
+                    logger.warning("Request failed with error: \(error). Remaining retries: \(currentRetriesRemaining). Retrying in \(retryInterval) ms.")
                     let deadline = DispatchTime.now() + .milliseconds(retryInterval)
                     queue.asyncAfter(deadline: deadline) {
-                        Log.debug("Reattempting request due to remaining retries: \(currentRetriesRemaining)")
+                        logger.debug("Reattempting request due to remaining retries: \(currentRetriesRemaining)")
                         do {
                             // execute again
                             try self.executeAsyncWithOutput()
@@ -108,9 +110,9 @@ public extension HTTPClient {
                 }
                 
                 if !shouldRetryOnError {
-                    Log.debug("Request not retried due to error returned: \(error)")
+                    logger.debug("Request not retried due to error returned: \(error)")
                 } else {
-                    Log.debug("Request not retried due to maximum retries: \(retryConfiguration.numRetries)")
+                    logger.debug("Request not retried due to maximum retries: \(retryConfiguration.numRetries)")
                 }
                 
                 // its an error; complete with the provided error

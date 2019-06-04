@@ -37,12 +37,12 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.0.0"),
         .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.0.0"),
-        .package(url: "https://github.com/IBM-Swift/LoggerAPI.git", .upToNextMajor(from: "1.0.0")),
+        .package(url: "https://github.com/apple/swift-log.git", .upToNextMajor(from: "1.0.0")),
     ],
     targets: [
         .target(
             name: "SmokeHTTPClient",
-            dependencies: ["LoggerAPI", "NIO", "NIOHTTP1", "NIOFoundationCompat", "NIOSSL"]),
+            dependencies: ["Logging", "NIO", "NIOHTTP1", "NIOFoundationCompat", "NIOSSL"]),
         .target(
             name: "QueryCoding",
             dependencies: ["ShapeCoding"]),
@@ -54,7 +54,7 @@ let package = Package(
             dependencies: ["ShapeCoding"]),
         .target(
             name: "ShapeCoding",
-            dependencies: ["LoggerAPI"]),
+            dependencies: ["Logging"]),
         .testTarget(
             name: "SmokeHTTPClientTests",
             dependencies: ["SmokeHTTPClient"]),

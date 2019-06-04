@@ -21,7 +21,9 @@ import NIOHTTP1
 import NIOSSL
 import NIOTLS
 import NIOFoundationCompat
-import LoggerAPI
+import Logging
+
+private let logger = Logger(label: "com.amazon.SmokeHTTPClient.HTTPClientChannelInboundHandler")
 
 internal struct HttpHeaderNames {
     /// Content-Length Header
@@ -106,7 +108,7 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
         // This is the response head
         case .head(let response):
             responseHead = response
-            Log.verbose("Response head received.")
+            logger.debug("Response head received.")
         // This is part of the response body
         case .body(var byteBuffer):
             let byteBufferSize = byteBuffer.readableBytes
@@ -120,10 +122,10 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
                 partialBody = newData
             }
             
-            Log.verbose("Response body part of \(byteBufferSize) bytes received.")
+            logger.debug("Response body part of \(byteBufferSize) bytes received.")
         // This is the response end
         case .end:
-            Log.verbose("Response end received.")
+            logger.debug("Response end received.")
             // the head and all possible body parts have been received,
             // handle this response
             handleCompleteResponse(context: context, bodyData: partialBody)
@@ -145,18 +147,18 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
     func handleCompleteResponse(context: ChannelHandlerContext, bodyData: Data?) {
         // always close the channel context after the processing in this method
         defer {
-            Log.verbose("Closing channel on complete response.")
+            logger.debug("Closing channel on complete response.")
             context.close(promise: nil)
-            Log.verbose("Channel closed on complete response.")
+            logger.debug("Channel closed on complete response.")
         }
 
-        Log.verbose("Handling response body with \(bodyData?.count ?? 0) size.")
+        logger.debug("Handling response body with \(bodyData?.count ?? 0) size.")
 
         // ensure the response head from received
         guard let responseHead = responseHead else {
             let error = HTTPError.badResponse("Response head was not received")
 
-            Log.error("Response head was not received")
+            logger.error("Response head was not received")
 
             // complete with this error
             completion(.failure(error))
@@ -167,12 +169,12 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
         let responseComponents = HTTPResponseComponents(headers: headers,
                                                         body: bodyData)
 
+        let logMessagePrefix = "Got response from endpoint: \(endpointUrl) and path: \(endpointPath) with " +
+                "headers: \(responseHead) and"
         if let bodyData = bodyData {
-            Log.verbose("Got response from endpoint: \(endpointUrl) and path: \(endpointPath) with " +
-                "headers: \(responseHead) and body: \(bodyData)")
+            logger.debug("\(logMessagePrefix) body: \(bodyData)")
         } else {
-            Log.verbose("Got response from endpoint: \(endpointUrl) and path: \(endpointPath) with " +
-                "headers: \(responseHead) and empty body.")
+            logger.debug("\(logMessagePrefix) empty body.")
         }
         
         let isSuccess: Bool
@@ -213,7 +215,7 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
      Called when notifying about a connection error.
      */
     public func errorCaught(context: ChannelHandlerContext, error: Error) {
-        Log.verbose("Error received from HTTP connection: \(String(describing: error))")
+        logger.debug("Error received from HTTP connection: \(String(describing: error))")
 
         // close the channel
         context.close(promise: nil)
@@ -223,7 +225,7 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
      Called when the channel becomes active.
      */
     public func channelActive(context: ChannelHandlerContext) {
-        Log.verbose("Preparing request on channel active.")
+        logger.debug("Preparing request on channel active.")
         var headers = delegate.addClientSpecificHeaders(handler: self)
 
         // TODO: Move headers out to HTTPClient for UrlRequest
@@ -248,6 +250,6 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
         context.write(self.wrapOutboundOut(.head(httpRequestHead)), promise: nil)
         context.write(self.wrapOutboundOut(.body(.byteBuffer(buffer))), promise: nil)
         context.writeAndFlush(self.wrapOutboundOut(.end(nil)), promise: nil)
-        Log.verbose("Request prepared on channel active.")
+        logger.debug("Request prepared on channel active.")
     }
 }

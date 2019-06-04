@@ -20,7 +20,10 @@ import NIO
 import NIOHTTP1
 import NIOSSL
 import NIOTLS
-import LoggerAPI
+import Logging
+
+private let logger = Logger(label:
+    "com.amazon.SmokeHTTPClient.HTTPClient+executeSyncWithoutOutput")
 
 public extension HTTPClient {
     private struct AsyncErrorResult {
