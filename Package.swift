@@ -38,11 +38,12 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.0.0"),
         .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.0.0"),
         .package(url: "https://github.com/apple/swift-log.git", .upToNextMajor(from: "1.0.0")),
+        .package(url: "https://github.com/apple/swift-metrics.git", .upToNextMajor(from: "1.0.0")),
     ],
     targets: [
         .target(
             name: "SmokeHTTPClient",
-            dependencies: ["Logging", "NIO", "NIOHTTP1", "NIOFoundationCompat", "NIOSSL"]),
+            dependencies: ["Logging", "Metrics", "NIO", "NIOHTTP1", "NIOFoundationCompat", "NIOSSL"]),
         .target(
             name: "QueryCoding",
             dependencies: ["ShapeCoding"]),

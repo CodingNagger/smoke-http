@@ -26,14 +26,14 @@ public protocol HTTPClientChannelInboundHandlerDelegate {
     func handleErrorResponses(responseHead: HTTPResponseHead, responseBodyData: Data?) -> Error?
 }
 
-public struct DefaultHTTPClientChannelInboundHandlerDelegate {
-    let specifyContentHeadersForZeroLengthBody: Bool = true
+public struct DefaultHTTPClientChannelInboundHandlerDelegate: HTTPClientChannelInboundHandlerDelegate {
+    public let specifyContentHeadersForZeroLengthBody: Bool = true
 
-    func addClientSpecificHeaders(handler: HTTPClientChannelInboundHandler) -> [(String, String)] {
+    public func addClientSpecificHeaders(handler: HTTPClientChannelInboundHandler) -> [(String, String)] {
         return []
     }
 
-    func handleErrorResponses(responseHead: HTTPResponseHead, responseBodyData: Data?) -> Error? {
+    public func handleErrorResponses(responseHead: HTTPResponseHead, responseBodyData: Data?) -> Error? {
         return nil
     }
 }

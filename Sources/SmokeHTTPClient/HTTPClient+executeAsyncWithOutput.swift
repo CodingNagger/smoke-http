@@ -21,9 +21,7 @@ import NIOHTTP1
 import NIOSSL
 import NIOTLS
 import Logging
-
-private let logger = Logger(label:
-    "com.amazon.SmokeHTTPClient.HTTPClient+executeAsyncWithOutput")
+import Metrics
 
 public extension HTTPClient {
     /**
@@ -44,7 +42,7 @@ public extension HTTPClient {
             httpMethod: HTTPMethod,
             input: InputType,
             completion: @escaping (Result<OutputType, Swift.Error>) -> (),
-            handlerDelegate: HTTPClientChannelInboundHandlerDelegate) throws -> EventLoopFuture<Channel>
+            invocationContext: HTTPClientInvocationContext) throws -> EventLoopFuture<Channel>
         where InputType: HTTPRequestInputProtocol, OutputType: HTTPResponseOutputProtocol {
             return try executeAsyncWithOutput(
                 endpointOverride: endpointOverride,
@@ -53,7 +51,7 @@ public extension HTTPClient {
                 input: input,
                 completion: completion,
                 asyncResponseInvocationStrategy: GlobalDispatchQueueAsyncResponseInvocationStrategy<Result<OutputType, Swift.Error>>(),
-                handlerDelegate: handlerDelegate)
+                invocationContext: invocationContext)
     }
 
     /**
@@ -74,10 +72,17 @@ public extension HTTPClient {
             input: InputType,
             completion: @escaping (Result<OutputType, Swift.Error>) -> (),
             asyncResponseInvocationStrategy: InvocationStrategyType,
-            handlerDelegate: HTTPClientChannelInboundHandlerDelegate) throws -> EventLoopFuture<Channel>
+            invocationContext: HTTPClientInvocationContext) throws -> EventLoopFuture<Channel>
             where InputType: HTTPRequestInputProtocol, InvocationStrategyType: AsyncResponseInvocationStrategy,
         InvocationStrategyType.OutputType == Result<OutputType, Swift.Error>,
         OutputType: HTTPResponseOutputProtocol {
+            
+        let durationMetricDetails: (Date, Metrics.Timer)?
+        if let durationTimer = invocationContext.reporting.durationTimer {
+            durationMetricDetails = (Date(), durationTimer)
+        } else {
+            durationMetricDetails = nil
+        }
 
         var hasComplete = false
         let requestDelegate = clientDelegate
@@ -90,6 +95,9 @@ public extension HTTPClient {
             case .failure(let error):
                 // its an error; complete with the provided error
                 result = .failure(error)
+                
+                // report failure metric
+                invocationContext.reporting.failureCounter?.increment()
             case .success(let response):
                 do {
                     // decode the provided body into the desired type
@@ -99,10 +107,20 @@ public extension HTTPClient {
 
                     // complete with the decoded type
                     result = .success(output)
+                    
+                    // report success metric
+                    invocationContext.reporting.successCounter?.increment()
                 } catch {
                     // if there was a decoding error, complete with that error
                     result = .failure(error)
+                    
+                    // report success metric
+                    invocationContext.reporting.failureCounter?.increment()
                 }
+            }
+            
+            if let durationMetricDetails = durationMetricDetails {
+                durationMetricDetails.1.recordMicroseconds(Date().timeIntervalSince(durationMetricDetails.0))
             }
 
             asyncResponseInvocationStrategy.invokeResponse(response: result, completion: completion)
@@ -115,7 +133,7 @@ public extension HTTPClient {
                                              httpMethod: httpMethod,
                                              input: input,
                                              completion: wrappingCompletion,
-                                             handlerDelegate: handlerDelegate)
+                                             invocationContext: invocationContext)
             
         channelFuture.whenComplete { result in
             switch result {

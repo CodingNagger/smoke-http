@@ -21,9 +21,18 @@ import NIOHTTP1
 import NIOSSL
 import NIOTLS
 import Logging
+import Metrics
 
-private let logger = Logger(label:
-    "com.amazon.SmokeHTTPClient.HTTPClient+executeAsyncRetriableWithoutOutput")
+/**
+ When using retry wrappers, the `HTTPClient` itself should record any metrics.
+ */
+internal struct HTTPClientInnerRetryInvocationReporting: HTTPClientInvocationReporting {
+    let logger: Logging.Logger
+    let successCounter: Metrics.Counter? = nil
+    let failureCounter: Metrics.Counter? = nil
+    let retryCountRecorder: Metrics.Recorder? = nil
+    let durationTimer: Metrics.Timer? = nil
+}
 
 public extension HTTPClient {
     /**
@@ -38,18 +47,20 @@ public extension HTTPClient {
         let input: InputType
         let outerCompletion: (Error?) -> ()
         let asyncResponseInvocationStrategy: InvocationStrategyType
-        let handlerDelegate: HTTPClientChannelInboundHandlerDelegate
+        let invocationContext: HTTPClientInvocationContext
+        let innerInvocationContext: HTTPClientInvocationContext
         let httpClient: HTTPClient
         let retryConfiguration: HTTPClientRetryConfiguration
         let retryOnError: (Swift.Error) -> Bool
         let queue = DispatchQueue.global()
+        let durationMetricDetails: (Date, Metrics.Timer)?
         
         var retriesRemaining: Int
         
         init(endpointOverride: URL?, endpointPath: String, httpMethod: HTTPMethod,
              input: InputType, outerCompletion: @escaping (Error?) -> (),
              asyncResponseInvocationStrategy: InvocationStrategyType,
-             handlerDelegate: HTTPClientChannelInboundHandlerDelegate,
+             invocationContext: HTTPClientInvocationContext,
              httpClient: HTTPClient,
              retryConfiguration: HTTPClientRetryConfiguration,
              retryOnError: @escaping (Swift.Error) -> Bool) {
@@ -59,11 +70,20 @@ public extension HTTPClient {
             self.input = input
             self.outerCompletion = outerCompletion
             self.asyncResponseInvocationStrategy = asyncResponseInvocationStrategy
-            self.handlerDelegate = handlerDelegate
+            self.invocationContext = invocationContext
             self.httpClient = httpClient
             self.retryConfiguration = retryConfiguration
             self.retryOnError = retryOnError
             self.retriesRemaining = retryConfiguration.numRetries
+            
+            if let durationTimer = invocationContext.reporting.durationTimer {
+                self.durationMetricDetails = (Date(), durationTimer)
+            } else {
+                self.durationMetricDetails = nil
+            }
+            // When using retry wrappers, the `HTTPClient` itself should record any metrics.
+            let innerReporting = HTTPClientInnerRetryInvocationReporting(logger: invocationContext.reporting.logger)
+            self.innerInvocationContext = HTTPClientInvocationContext(reporting: innerReporting, handlerDelegate: invocationContext.handlerDelegate)
         }
         
         func executeAsyncWithoutOutput() throws {
@@ -72,11 +92,12 @@ public extension HTTPClient {
                                                          endpointPath: endpointPath, httpMethod: httpMethod,
                                                          input: input, completion: completion,
                                                          asyncResponseInvocationStrategy: asyncResponseInvocationStrategy,
-                                                         handlerDelegate: handlerDelegate)
+                                                         invocationContext: innerInvocationContext)
         }
         
         func completion(innerError: Error?) {
             let error: Error?
+            let logger = invocationContext.reporting.logger
 
             if let innerError = innerError {
                 let shouldRetryOnError = retryOnError(innerError)
@@ -116,8 +137,22 @@ public extension HTTPClient {
                 
                 // its an error; complete with the provided error
                 error = innerError
+                
+                // report success metric
+                invocationContext.reporting.failureCounter?.increment()
             } else {
                 error = innerError
+                
+                // report success metric
+                invocationContext.reporting.successCounter?.increment()
+            }
+            
+            // report the retryCount metric
+            let retryCount = retryConfiguration.numRetries - retriesRemaining
+            invocationContext.reporting.retryCountRecorder?.record(retryCount)
+            
+            if let durationMetricDetails = durationMetricDetails {
+                durationMetricDetails.1.recordMicroseconds(Date().timeIntervalSince(durationMetricDetails.0))
             }
 
             outerCompletion(error)
@@ -144,7 +179,7 @@ public extension HTTPClient {
         httpMethod: HTTPMethod,
         input: InputType,
         completion: @escaping (Error?) -> (),
-        handlerDelegate: HTTPClientChannelInboundHandlerDelegate,
+        invocationContext: HTTPClientInvocationContext,
         retryConfiguration: HTTPClientRetryConfiguration,
         retryOnError: @escaping (Swift.Error) -> Bool) throws
         where InputType: HTTPRequestInputProtocol {
@@ -155,7 +190,7 @@ public extension HTTPClient {
                 input: input,
                 completion: completion,
                 asyncResponseInvocationStrategy: GlobalDispatchQueueAsyncResponseInvocationStrategy<Error?>(),
-                handlerDelegate: handlerDelegate,
+                invocationContext: invocationContext,
                 retryConfiguration: retryConfiguration,
                 retryOnError: retryOnError)
     }
@@ -180,7 +215,7 @@ public extension HTTPClient {
         input: InputType,
         completion: @escaping (Error?) -> (),
         asyncResponseInvocationStrategy: InvocationStrategyType,
-        handlerDelegate: HTTPClientChannelInboundHandlerDelegate,
+        invocationContext: HTTPClientInvocationContext,
         retryConfiguration: HTTPClientRetryConfiguration,
         retryOnError: @escaping (Swift.Error) -> Bool) throws
         where InputType: HTTPRequestInputProtocol, InvocationStrategyType: AsyncResponseInvocationStrategy,
@@ -190,7 +225,7 @@ public extension HTTPClient {
                 endpointOverride: endpointOverride, endpointPath: endpointPath,
                 httpMethod: httpMethod, input: input, outerCompletion: completion,
                 asyncResponseInvocationStrategy: asyncResponseInvocationStrategy,
-                handlerDelegate: handlerDelegate, httpClient: self,
+                invocationContext: invocationContext, httpClient: self,
                 retryConfiguration: retryConfiguration,
                 retryOnError: retryOnError)
             

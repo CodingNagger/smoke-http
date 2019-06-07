@@ -23,8 +23,6 @@ import NIOTLS
 import NIOFoundationCompat
 import Logging
 
-private let logger = Logger(label: "com.amazon.SmokeHTTPClient.HTTPClientChannelInboundHandler")
-
 internal struct HttpHeaderNames {
     /// Content-Length Header
     static let contentLength = "Content-Length"
@@ -64,6 +62,7 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
     private let errorProvider: (HTTPResponseHead, HTTPResponseComponents) throws -> Error
     /// Delegate that provides client-specific logic
     private let delegate: HTTPClientChannelInboundHandlerDelegate
+    private let logger: Logging.Logger
 
     /**
      Initializer.
@@ -86,7 +85,8 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
          additionalHeaders: [(String, String)],
          errorProvider: @escaping (HTTPResponseHead, HTTPResponseComponents) throws -> Error,
          completion: @escaping (Result<HTTPResponseComponents, Swift.Error>) -> (),
-         channelInboundHandlerDelegate: HTTPClientChannelInboundHandlerDelegate) {
+         channelInboundHandlerDelegate: HTTPClientChannelInboundHandlerDelegate,
+         logger: Logging.Logger) {
         self.contentType = contentType
         self.endpointUrl = endpointUrl
         self.endpointPath = endpointPath
@@ -96,6 +96,7 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
         self.errorProvider = errorProvider
         self.completion = completion
         self.delegate = channelInboundHandlerDelegate
+        self.logger = logger
     }
 
     /**

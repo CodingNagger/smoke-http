@@ -22,9 +22,6 @@ import NIOSSL
 import NIOTLS
 import Logging
 
-private let logger = Logger(label:
-    "com.amazon.SmokeHTTPClient.HTTPClient+executeSyncWithoutOutput")
-
 public extension HTTPClient {
     private struct AsyncErrorResult {
         let error: Error?
@@ -45,7 +42,7 @@ public extension HTTPClient {
         endpointPath: String,
         httpMethod: HTTPMethod,
         input: InputType,
-        handlerDelegate: HTTPClientChannelInboundHandlerDelegate) throws
+        invocationContext: HTTPClientInvocationContext) throws
         where InputType: HTTPRequestInputProtocol {
             var responseError: AsyncErrorResult?
             let completedSemaphore = DispatchSemaphore(value: 0)
@@ -63,7 +60,7 @@ public extension HTTPClient {
                 completion: completion,
                 // the completion handler can be safely executed on a SwiftNIO thread
                 asyncResponseInvocationStrategy: SameThreadAsyncResponseInvocationStrategy<Error?>(),
-                handlerDelegate: handlerDelegate)
+                invocationContext: invocationContext)
             
             channelFuture.whenComplete { result in
                 switch result {

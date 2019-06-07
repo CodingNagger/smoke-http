@@ -42,7 +42,7 @@ public extension HTTPClient {
         endpointPath: String,
         httpMethod: HTTPMethod,
         input: InputType,
-        handlerDelegate: HTTPClientChannelInboundHandlerDelegate) throws -> OutputType
+        invocationContext: HTTPClientInvocationContext) throws -> OutputType
         where InputType: HTTPRequestInputProtocol,
         OutputType: HTTPResponseOutputProtocol {
             
@@ -62,7 +62,7 @@ public extension HTTPClient {
                 completion: completion,
                 // the completion handler can be safely executed on a SwiftNIO thread
                 asyncResponseInvocationStrategy: SameThreadAsyncResponseInvocationStrategy<Result<OutputType, Swift.Error>>(),
-                handlerDelegate: handlerDelegate)
+                invocationContext: invocationContext)
             
             channelFuture.whenComplete { result in
                 switch result {
@@ -81,6 +81,7 @@ public extension HTTPClient {
                 }
             }
             
+            let logger = invocationContext.reporting.logger
             logger.debug("Waiting for response from \(endpointOverride?.host ?? endpointHostName) ...")
             completedSemaphore.wait()
             

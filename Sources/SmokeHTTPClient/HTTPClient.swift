@@ -22,8 +22,6 @@ import NIOSSL
 import NIOTLS
 import Logging
 
-private let logger = Logger(label: "com.amazon.SmokeHTTPClient.HTTPClient")
-
 public class HTTPClient {
     /// The server hostname to contact for requests from this client.
     public let endpointHostName: String
@@ -117,6 +115,8 @@ public class HTTPClient {
      */
     deinit {
         guard isClosed() else {
+            let logger = Logger(label: "com.amazon.HTTPClient")
+            
             return logger.error("HTTPClient was not closed properly prior to de-initialization.")
         }
     }
@@ -169,7 +169,7 @@ public class HTTPClient {
             httpMethod: HTTPMethod,
             input: InputType,
             completion: @escaping (Result<HTTPResponseComponents, Swift.Error>) -> (),
-            handlerDelegate: HTTPClientChannelInboundHandlerDelegate) throws -> EventLoopFuture<Channel>
+            invocationContext: HTTPClientInvocationContext) throws -> EventLoopFuture<Channel>
             where InputType: HTTPRequestInputProtocol {
 
         let endpointHostName = endpointOverride?.host ?? self.endpointHostName
@@ -202,6 +202,7 @@ public class HTTPClient {
             throw HTTPError.invalidRequest("Request endpoint '\(endpoint)' not valid URL.")
         }
 
+        let logger = invocationContext.reporting.logger
         logger.debug("Sending \(httpMethod) request to endpoint: \(endpoint) at path: \(sendPath).")
 
         let handler = HTTPClientChannelInboundHandler(contentType: contentType,
@@ -212,7 +213,8 @@ public class HTTPClient {
                                                       additionalHeaders: additionalHeaders,
                                                       errorProvider: clientDelegate.getResponseError,
                                                       completion: completion,
-                                                      channelInboundHandlerDelegate: handlerDelegate)
+                                                      channelInboundHandlerDelegate: invocationContext.handlerDelegate,
+                                                      logger: logger)
 
         let bootstrap: ClientBootstrap
         // include the sslHandler in the channel pipeline if there one

@@ -21,9 +21,7 @@ import NIOHTTP1
 import NIOSSL
 import NIOTLS
 import Logging
-
-private let logger = Logger(label:
-    "com.amazon.SmokeHTTPClient.HTTPClient+executeSyncRetriableWithoutOutput")
+import Metrics
 
 private extension Int {
     var milliFromMicroSeconds: Int {
@@ -41,16 +39,18 @@ public extension HTTPClient {
         let endpointPath: String
         let httpMethod: HTTPMethod
         let input: InputType
-        let handlerDelegate: HTTPClientChannelInboundHandlerDelegate
+        let invocationContext: HTTPClientInvocationContext
+        let innerInvocationContext: HTTPClientInvocationContext
         let httpClient: HTTPClient
         let retryConfiguration: HTTPClientRetryConfiguration
         let retryOnError: (Swift.Error) -> Bool
+        let durationMetricDetails: (Date, Metrics.Timer)?
         
         var retriesRemaining: Int
         
         init(endpointOverride: URL?, endpointPath: String, httpMethod: HTTPMethod,
              input: InputType,
-             handlerDelegate: HTTPClientChannelInboundHandlerDelegate,
+             invocationContext: HTTPClientInvocationContext,
              httpClient: HTTPClient,
              retryConfiguration: HTTPClientRetryConfiguration,
              retryOnError: @escaping (Swift.Error) -> Bool) {
@@ -58,26 +58,52 @@ public extension HTTPClient {
             self.endpointPath = endpointPath
             self.httpMethod = httpMethod
             self.input = input
-            self.handlerDelegate = handlerDelegate
+            self.invocationContext = invocationContext
             self.httpClient = httpClient
             self.retryConfiguration = retryConfiguration
             self.retriesRemaining = retryConfiguration.numRetries
             self.retryOnError = retryOnError
+            
+            if let durationTimer = invocationContext.reporting.durationTimer {
+                self.durationMetricDetails = (Date(), durationTimer)
+            } else {
+                self.durationMetricDetails = nil
+            }
+            // When using retry wrappers, the `HTTPClient` itself should record any metrics.
+            let innerReporting = HTTPClientInnerRetryInvocationReporting(logger: invocationContext.reporting.logger)
+            self.innerInvocationContext = HTTPClientInvocationContext(reporting: innerReporting, handlerDelegate: invocationContext.handlerDelegate)
         }
         
         func executeSyncWithoutOutput() throws {
+            defer {
+                // report the retryCount metric
+                let retryCount = retryConfiguration.numRetries - retriesRemaining
+                invocationContext.reporting.retryCountRecorder?.record(retryCount)
+                
+                if let durationMetricDetails = durationMetricDetails {
+                    durationMetricDetails.1.recordMicroseconds(Date().timeIntervalSince(durationMetricDetails.0))
+                }
+            }
+            
             do {
                 // submit the synchronous request
                 try httpClient.executeSyncWithoutOutput(endpointOverride: endpointOverride,
                                                               endpointPath: endpointPath, httpMethod: httpMethod,
-                                                              input: input, handlerDelegate: handlerDelegate)
+                                                              input: input, invocationContext: innerInvocationContext)
+                
+                // report success metric
+                invocationContext.reporting.successCounter?.increment()
             } catch {
+                // report success metric
+                invocationContext.reporting.failureCounter?.increment()
+                
                 return try completeOnError(error: error)
             }
         }
         
         func completeOnError(error: Error) throws {
             let shouldRetryOnError = retryOnError(error)
+            let logger = invocationContext.reporting.logger
             
             // if there are retries remaining and we should retry on this error
             if retriesRemaining > 0 && shouldRetryOnError {
@@ -119,7 +145,7 @@ public extension HTTPClient {
         endpointPath: String,
         httpMethod: HTTPMethod,
         input: InputType,
-        handlerDelegate: HTTPClientChannelInboundHandlerDelegate,
+        invocationContext: HTTPClientInvocationContext,
         retryConfiguration: HTTPClientRetryConfiguration,
         retryOnError: @escaping (Swift.Error) -> Bool) throws
         where InputType: HTTPRequestInputProtocol {
@@ -127,7 +153,7 @@ public extension HTTPClient {
             let retriable = ExecuteSyncWithoutOutputRetriable<InputType>(
                 endpointOverride: endpointOverride, endpointPath: endpointPath,
                 httpMethod: httpMethod, input: input,
-                handlerDelegate: handlerDelegate, httpClient: self,
+                invocationContext: invocationContext, httpClient: self,
                 retryConfiguration: retryConfiguration,
                 retryOnError: retryOnError)
             

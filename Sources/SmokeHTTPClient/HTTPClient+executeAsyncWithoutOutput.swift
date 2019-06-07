@@ -21,9 +21,7 @@ import NIOHTTP1
 import NIOSSL
 import NIOTLS
 import Logging
-
-private let logger = Logger(label:
-    "com.amazon.SmokeHTTPClient.HTTPClient+executeAsyncWithoutOutput")
+import Metrics
 
 public extension HTTPClient {
     /**
@@ -44,7 +42,7 @@ public extension HTTPClient {
         httpMethod: HTTPMethod,
         input: InputType,
         completion: @escaping (Error?) -> (),
-        handlerDelegate: HTTPClientChannelInboundHandlerDelegate) throws -> EventLoopFuture<Channel>
+        invocationContext: HTTPClientInvocationContext) throws -> EventLoopFuture<Channel>
         where InputType: HTTPRequestInputProtocol {
             return try executeAsyncWithoutOutput(
                 endpointOverride: endpointOverride,
@@ -53,7 +51,7 @@ public extension HTTPClient {
                 input: input,
                 completion: completion,
                 asyncResponseInvocationStrategy: GlobalDispatchQueueAsyncResponseInvocationStrategy<Error?>(),
-                handlerDelegate: handlerDelegate)
+                invocationContext: invocationContext)
     }
     
     /**
@@ -74,9 +72,16 @@ public extension HTTPClient {
         input: InputType,
         completion: @escaping (Error?) -> (),
         asyncResponseInvocationStrategy: InvocationStrategyType,
-        handlerDelegate: HTTPClientChannelInboundHandlerDelegate) throws -> EventLoopFuture<Channel>
+        invocationContext: HTTPClientInvocationContext) throws -> EventLoopFuture<Channel>
         where InputType: HTTPRequestInputProtocol, InvocationStrategyType: AsyncResponseInvocationStrategy,
         InvocationStrategyType.OutputType == Error? {
+            
+            let durationMetricDetails: (Date, Metrics.Timer)?
+            if let durationTimer = invocationContext.reporting.durationTimer {
+                durationMetricDetails = (Date(), durationTimer)
+            } else {
+                durationMetricDetails = nil
+            }
             
             var hasComplete = false
             // create a wrapping completion handler to pass to the ChannelInboundHandler
@@ -87,9 +92,19 @@ public extension HTTPClient {
                 case .failure(let error):
                     // its an error, complete with this error
                     result = error
+                    
+                    // report failure metric
+                    invocationContext.reporting.failureCounter?.increment()
                 case .success:
                     // its a successful completion, complete with an empty error.
                     result = nil
+                    
+                    // report success metric
+                    invocationContext.reporting.successCounter?.increment()
+                }
+                
+                if let durationMetricDetails = durationMetricDetails {
+                    durationMetricDetails.1.recordMicroseconds(Date().timeIntervalSince(durationMetricDetails.0))
                 }
                 
                 asyncResponseInvocationStrategy.invokeResponse(response: result, completion: completion)
@@ -102,7 +117,7 @@ public extension HTTPClient {
                                                  httpMethod: httpMethod,
                                                  input: input,
                                                  completion: wrappingCompletion,
-                                                 handlerDelegate: handlerDelegate)
+                                                 invocationContext: invocationContext)
             
             channelFuture.whenComplete { result in
                 switch result {
