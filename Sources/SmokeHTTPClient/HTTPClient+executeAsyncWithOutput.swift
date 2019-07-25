@@ -41,7 +41,7 @@ public extension HTTPClient {
             endpointPath: String,
             httpMethod: HTTPMethod,
             input: InputType,
-            completion: @escaping (Result<OutputType, Swift.Error>) -> (),
+            completion: @escaping (Result<OutputType, HTTPClientError>) -> (),
             invocationContext: HTTPClientInvocationContext) throws -> EventLoopFuture<Channel>
         where InputType: HTTPRequestInputProtocol, OutputType: HTTPResponseOutputProtocol {
             return try executeAsyncWithOutput(
@@ -50,7 +50,7 @@ public extension HTTPClient {
                 httpMethod: httpMethod,
                 input: input,
                 completion: completion,
-                asyncResponseInvocationStrategy: GlobalDispatchQueueAsyncResponseInvocationStrategy<Result<OutputType, Swift.Error>>(),
+                asyncResponseInvocationStrategy: GlobalDispatchQueueAsyncResponseInvocationStrategy<Result<OutputType, HTTPClientError>>(),
                 invocationContext: invocationContext)
     }
 
@@ -70,15 +70,15 @@ public extension HTTPClient {
             endpointPath: String,
             httpMethod: HTTPMethod,
             input: InputType,
-            completion: @escaping (Result<OutputType, Swift.Error>) -> (),
+            completion: @escaping (Result<OutputType, HTTPClientError>) -> (),
             asyncResponseInvocationStrategy: InvocationStrategyType,
             invocationContext: HTTPClientInvocationContext) throws -> EventLoopFuture<Channel>
             where InputType: HTTPRequestInputProtocol, InvocationStrategyType: AsyncResponseInvocationStrategy,
-        InvocationStrategyType.OutputType == Result<OutputType, Swift.Error>,
+        InvocationStrategyType.OutputType == Result<OutputType, HTTPClientError>,
         OutputType: HTTPResponseOutputProtocol {
             
         let durationMetricDetails: (Date, Metrics.Timer)?
-        if let durationTimer = invocationContext.reporting.durationTimer {
+        if let durationTimer = invocationContext.reporting.latencyTimer {
             durationMetricDetails = (Date(), durationTimer)
         } else {
             durationMetricDetails = nil
@@ -88,8 +88,8 @@ public extension HTTPClient {
         let requestDelegate = clientDelegate
         // create a wrapping completion handler to pass to the ChannelInboundHandler
         // that will decode the returned body into the desired decodable type.
-        let wrappingCompletion: (Result<HTTPResponseComponents, Swift.Error>) -> () = { (rawResult) in
-            let result: Result<OutputType, Swift.Error>
+        let wrappingCompletion: (Result<HTTPResponseComponents, HTTPClientError>) -> () = { (rawResult) in
+            let result: Result<OutputType, HTTPClientError>
 
             switch rawResult {
             case .failure(let error):
@@ -97,13 +97,19 @@ public extension HTTPClient {
                 result = .failure(error)
                 
                 // report failure metric
-                invocationContext.reporting.failureCounter?.increment()
+                switch error.category {
+                case .clientError:
+                    invocationContext.reporting.failure4XXCounter?.increment()
+                case .serverError:
+                    invocationContext.reporting.failure5XXCounter?.increment()
+                }
             case .success(let response):
                 do {
                     // decode the provided body into the desired type
                     let output: OutputType = try requestDelegate.decodeOutput(
                         output: response.body,
-                        headers: response.headers)
+                        headers: response.headers,
+                        invocationReporting: invocationContext.reporting)
 
                     // complete with the decoded type
                     result = .success(output)
@@ -112,10 +118,10 @@ public extension HTTPClient {
                     invocationContext.reporting.successCounter?.increment()
                 } catch {
                     // if there was a decoding error, complete with that error
-                    result = .failure(error)
+                    result = .failure(HTTPClientError(responseCode: 400, cause: error))
                     
                     // report success metric
-                    invocationContext.reporting.failureCounter?.increment()
+                    invocationContext.reporting.failure4XXCounter?.increment()
                 }
             }
             
@@ -146,7 +152,7 @@ public extension HTTPClient {
                 }
             case .failure(let error):
                 // there was an issue creating the channel
-                completion(.failure(error))
+                completion(.failure(HTTPClientError(responseCode: 500, cause: error)))
             }
         }
 

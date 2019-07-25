@@ -22,6 +22,30 @@ import NIOSSL
 import NIOTLS
 import Logging
 
+public struct HTTPClientError: Error {
+    public let responseCode: Int
+    public let cause: Swift.Error
+    
+    public enum Category {
+        case clientError
+        case serverError
+    }
+    
+    public init(responseCode: Int, cause: Swift.Error) {
+        self.responseCode = responseCode
+        self.cause = cause
+    }
+    
+    public var category: Category {
+        switch responseCode {
+        case 400...499:
+            return .clientError
+        default:
+            return .serverError
+        }
+    }
+}
+
 public class HTTPClient {
     /// The server hostname to contact for requests from this client.
     public let endpointHostName: String
@@ -60,7 +84,8 @@ public class HTTPClient {
     private var stateLock: NSLock
     
     static let unexpectedClosureType =
-        HTTPError.connectionError("Http request was unexpectedly closed without returning a response.")
+        HTTPClientError(responseCode: 500,
+                        cause: HTTPError.connectionError("Http request was unexpectedly closed without returning a response."))
 
     /// The event loop used by requests/responses from this client
     let eventLoopGroup: EventLoopGroup
@@ -168,7 +193,7 @@ public class HTTPClient {
             endpointPath: String,
             httpMethod: HTTPMethod,
             input: InputType,
-            completion: @escaping (Result<HTTPResponseComponents, Swift.Error>) -> (),
+            completion: @escaping (Result<HTTPResponseComponents, HTTPClientError>) -> (),
             invocationContext: HTTPClientInvocationContext) throws -> EventLoopFuture<Channel>
             where InputType: HTTPRequestInputProtocol {
 
@@ -189,7 +214,8 @@ public class HTTPClient {
 
         let requestComponents = try clientDelegate.encodeInputAndQueryString(
             input: input,
-            httpPath: endpointPath)
+            httpPath: endpointPath,
+            invocationReporting: invocationContext.reporting)
 
         let pathWithQuery = requestComponents.pathWithQuery
 
@@ -214,7 +240,7 @@ public class HTTPClient {
                                                       errorProvider: clientDelegate.getResponseError,
                                                       completion: completion,
                                                       channelInboundHandlerDelegate: invocationContext.handlerDelegate,
-                                                      logger: logger)
+                                                      invocationReporting: invocationContext.reporting)
 
         let bootstrap: ClientBootstrap
         // include the sslHandler in the channel pipeline if there one

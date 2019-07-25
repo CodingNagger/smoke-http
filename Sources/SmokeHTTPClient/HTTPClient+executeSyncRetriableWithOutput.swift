@@ -38,8 +38,8 @@ public extension HTTPClient {
         let innerInvocationContext: HTTPClientInvocationContext
         let httpClient: HTTPClient
         let retryConfiguration: HTTPClientRetryConfiguration
-        let retryOnError: (Swift.Error) -> Bool
-        let durationMetricDetails: (Date, Metrics.Timer)?
+        let retryOnError: (HTTPClientError) -> Bool
+        let latencyMetricDetails: (Date, Metrics.Timer)?
         
         var retriesRemaining: Int
         
@@ -61,10 +61,10 @@ public extension HTTPClient {
             self.retriesRemaining = retryConfiguration.numRetries
             self.retryOnError = retryOnError
             
-            if let durationTimer = invocationContext.reporting.durationTimer {
-                self.durationMetricDetails = (Date(), durationTimer)
+            if let latencyTimer = invocationContext.reporting.latencyTimer {
+                self.latencyMetricDetails = (Date(), latencyTimer)
             } else {
-                self.durationMetricDetails = nil
+                self.latencyMetricDetails = nil
             }
             // When using retry wrappers, the `HTTPClient` itself should record any metrics.
             let innerReporting = HTTPClientInnerRetryInvocationReporting(logger: invocationContext.reporting.logger)
@@ -77,7 +77,7 @@ public extension HTTPClient {
                 let retryCount = retryConfiguration.numRetries - retriesRemaining
                 invocationContext.reporting.retryCountRecorder?.record(retryCount)
                 
-                if let durationMetricDetails = durationMetricDetails {
+                if let durationMetricDetails = latencyMetricDetails {
                     durationMetricDetails.1.recordMicroseconds(Date().timeIntervalSince(durationMetricDetails.0))
                 }
             }
@@ -92,16 +92,33 @@ public extension HTTPClient {
                 invocationContext.reporting.successCounter?.increment()
                 
                 return value
-            } catch {
-                // report success metric
-                invocationContext.reporting.failureCounter?.increment()
+            } catch let error as HTTPClientError {
+                // report failure metric
+                switch error.category {
+                case .clientError:
+                    invocationContext.reporting.failure4XXCounter?.increment()
+                case .serverError:
+                    invocationContext.reporting.failure5XXCounter?.increment()
+                }
                 
                 return try completeOnError(error: error)
+            } catch {
+                // report success metric
+                invocationContext.reporting.failure4XXCounter?.increment()
+                
+                return try completeOnError(error: HTTPClientError(responseCode: 400, cause: error))
             }
         }
         
-        func completeOnError(error: Error) throws -> OutputType {
-            let shouldRetryOnError = retryOnError(error)
+        func completeOnError(error: HTTPClientError) throws -> OutputType {
+            let shouldRetryOnError: Bool
+            switch error.category {
+            case .clientError:
+                // never retry
+                shouldRetryOnError = false
+            case .serverError:
+                shouldRetryOnError = retryOnError(error)
+            }
             let logger = invocationContext.reporting.logger
             
             // if there are retries remaining and we should retry on this error

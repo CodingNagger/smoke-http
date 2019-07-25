@@ -47,7 +47,7 @@ public extension HTTPClient {
             var responseError: AsyncErrorResult?
             let completedSemaphore = DispatchSemaphore(value: 0)
             
-            let completion: (Error?) -> () = { error in
+            let completion: (HTTPClientError?) -> () = { error in
                 responseError = AsyncErrorResult(error: error)
                 completedSemaphore.signal()
             }
@@ -59,7 +59,7 @@ public extension HTTPClient {
                 input: input,
                 completion: completion,
                 // the completion handler can be safely executed on a SwiftNIO thread
-                asyncResponseInvocationStrategy: SameThreadAsyncResponseInvocationStrategy<Error?>(),
+                asyncResponseInvocationStrategy: SameThreadAsyncResponseInvocationStrategy<HTTPClientError?>(),
                 invocationContext: invocationContext)
             
             channelFuture.whenComplete { result in

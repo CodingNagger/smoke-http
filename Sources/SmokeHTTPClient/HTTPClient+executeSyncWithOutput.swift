@@ -22,9 +22,6 @@ import NIOSSL
 import NIOTLS
 import Logging
 
-private let logger = Logger(label:
-    "com.amazon.SmokeHTTPClient.HTTPClient+executeSyncWithOutput")
-
 public extension HTTPClient {
     /**
      Submits a request that will return a response body to this client synchronously.
@@ -46,10 +43,10 @@ public extension HTTPClient {
         where InputType: HTTPRequestInputProtocol,
         OutputType: HTTPResponseOutputProtocol {
             
-            var responseResult: Result<OutputType, Swift.Error>?
+            var responseResult: Result<OutputType, HTTPClientError>?
             let completedSemaphore = DispatchSemaphore(value: 0)
             
-            let completion: (Result<OutputType, Swift.Error>) -> () = { result in
+            let completion: (Result<OutputType, HTTPClientError>) -> () = { result in
                 responseResult = result
                 completedSemaphore.signal()
             }
@@ -61,7 +58,7 @@ public extension HTTPClient {
                 input: input,
                 completion: completion,
                 // the completion handler can be safely executed on a SwiftNIO thread
-                asyncResponseInvocationStrategy: SameThreadAsyncResponseInvocationStrategy<Result<OutputType, Swift.Error>>(),
+                asyncResponseInvocationStrategy: SameThreadAsyncResponseInvocationStrategy<Result<OutputType, HTTPClientError>>(),
                 invocationContext: invocationContext)
             
             channelFuture.whenComplete { result in
@@ -76,7 +73,7 @@ public extension HTTPClient {
                     }
                 case .failure(let error):
                     // there was an issue creating the channel
-                    responseResult = .failure(error)
+                    responseResult = .failure(HTTPClientError(responseCode: 500, cause: error))
                     completedSemaphore.signal()
                 }
             }

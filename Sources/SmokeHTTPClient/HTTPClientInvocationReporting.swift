@@ -11,7 +11,7 @@
 // express or implied. See the License for the specific language governing
 // permissions and limitations under the License.
 //
-//  HTTPClientInvocationReportingContext.swift
+//  HTTPClientInvocationReporting.swift
 //  SmokeHTTPClient
 //
 
@@ -31,11 +31,14 @@ public protocol HTTPClientInvocationReporting {
     var successCounter: Metrics.Counter? { get }
     
     /// The `Metrics.Counter` to record the failure of this invocation.
-    var failureCounter: Metrics.Counter? { get }
+    var failure5XXCounter: Metrics.Counter? { get }
+    
+    /// The `Metrics.Counter` to record the failure of this invocation.
+    var failure4XXCounter: Metrics.Counter? { get }
     
     /// The `Metrics.Recorder` to record the number of retries that occurred as part of this invocation.
     var retryCountRecorder: Metrics.Recorder? { get }
     
     /// The `Metrics.Recorder` to record the duration of this invocation.
-    var durationTimer: Metrics.Timer? { get }
+    var latencyTimer: Metrics.Timer? { get }
 }

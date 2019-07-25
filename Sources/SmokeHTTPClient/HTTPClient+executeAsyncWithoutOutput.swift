@@ -41,7 +41,7 @@ public extension HTTPClient {
         endpointPath: String,
         httpMethod: HTTPMethod,
         input: InputType,
-        completion: @escaping (Error?) -> (),
+        completion: @escaping (HTTPClientError?) -> (),
         invocationContext: HTTPClientInvocationContext) throws -> EventLoopFuture<Channel>
         where InputType: HTTPRequestInputProtocol {
             return try executeAsyncWithoutOutput(
@@ -50,7 +50,7 @@ public extension HTTPClient {
                 httpMethod: httpMethod,
                 input: input,
                 completion: completion,
-                asyncResponseInvocationStrategy: GlobalDispatchQueueAsyncResponseInvocationStrategy<Error?>(),
+                asyncResponseInvocationStrategy: GlobalDispatchQueueAsyncResponseInvocationStrategy<HTTPClientError?>(),
                 invocationContext: invocationContext)
     }
     
@@ -70,23 +70,23 @@ public extension HTTPClient {
         endpointPath: String,
         httpMethod: HTTPMethod,
         input: InputType,
-        completion: @escaping (Error?) -> (),
+        completion: @escaping (HTTPClientError?) -> (),
         asyncResponseInvocationStrategy: InvocationStrategyType,
         invocationContext: HTTPClientInvocationContext) throws -> EventLoopFuture<Channel>
         where InputType: HTTPRequestInputProtocol, InvocationStrategyType: AsyncResponseInvocationStrategy,
-        InvocationStrategyType.OutputType == Error? {
+        InvocationStrategyType.OutputType == HTTPClientError? {
             
-            let durationMetricDetails: (Date, Metrics.Timer)?
-            if let durationTimer = invocationContext.reporting.durationTimer {
-                durationMetricDetails = (Date(), durationTimer)
+            let latencyMetricDetails: (Date, Metrics.Timer)?
+            if let latencyTimer = invocationContext.reporting.latencyTimer {
+                latencyMetricDetails = (Date(), latencyTimer)
             } else {
-                durationMetricDetails = nil
+                latencyMetricDetails = nil
             }
             
             var hasComplete = false
             // create a wrapping completion handler to pass to the ChannelInboundHandler
-            let wrappingCompletion: (Result<HTTPResponseComponents, Swift.Error>) -> () = { (rawResult) in
-                let result: Error?
+            let wrappingCompletion: (Result<HTTPResponseComponents, HTTPClientError>) -> () = { (rawResult) in
+                let result: HTTPClientError?
                 
                 switch rawResult {
                 case .failure(let error):
@@ -94,7 +94,12 @@ public extension HTTPClient {
                     result = error
                     
                     // report failure metric
-                    invocationContext.reporting.failureCounter?.increment()
+                    switch error.category {
+                    case .clientError:
+                        invocationContext.reporting.failure4XXCounter?.increment()
+                    case .serverError:
+                        invocationContext.reporting.failure5XXCounter?.increment()
+                    }
                 case .success:
                     // its a successful completion, complete with an empty error.
                     result = nil
@@ -103,7 +108,7 @@ public extension HTTPClient {
                     invocationContext.reporting.successCounter?.increment()
                 }
                 
-                if let durationMetricDetails = durationMetricDetails {
+                if let durationMetricDetails = latencyMetricDetails {
                     durationMetricDetails.1.recordMicroseconds(Date().timeIntervalSince(durationMetricDetails.0))
                 }
                 
@@ -130,7 +135,7 @@ public extension HTTPClient {
                     }
                 case .failure(let error):
                     // there was an issue creating the channel
-                    completion(error)
+                    completion(HTTPClientError(responseCode: 500, cause: error))
                 }
             }
             

@@ -57,12 +57,12 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
     public var partialBody: Data?
 
     /// A completion handler to pass any recieved response to.
-    private let completion: (Result<HTTPResponseComponents, Swift.Error>) -> ()
+    private let completion: (Result<HTTPResponseComponents, HTTPClientError>) -> ()
     /// A function that provides an Error based on the payload provided.
-    private let errorProvider: (HTTPResponseHead, HTTPResponseComponents) throws -> Error
+    private let errorProvider: (HTTPResponseHead, HTTPResponseComponents, HTTPClientInvocationReporting) throws -> HTTPClientError
     /// Delegate that provides client-specific logic
     private let delegate: HTTPClientChannelInboundHandlerDelegate
-    private let logger: Logging.Logger
+    private let invocationReporting: HTTPClientInvocationReporting
 
     /**
      Initializer.
@@ -83,10 +83,10 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
          httpMethod: HTTPMethod,
          bodyData: Data,
          additionalHeaders: [(String, String)],
-         errorProvider: @escaping (HTTPResponseHead, HTTPResponseComponents) throws -> Error,
-         completion: @escaping (Result<HTTPResponseComponents, Swift.Error>) -> (),
+         errorProvider: @escaping (HTTPResponseHead, HTTPResponseComponents, HTTPClientInvocationReporting) throws -> HTTPClientError,
+         completion: @escaping (Result<HTTPResponseComponents, HTTPClientError>) -> (),
          channelInboundHandlerDelegate: HTTPClientChannelInboundHandlerDelegate,
-         logger: Logging.Logger) {
+         invocationReporting: HTTPClientInvocationReporting) {
         self.contentType = contentType
         self.endpointUrl = endpointUrl
         self.endpointPath = endpointPath
@@ -96,7 +96,7 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
         self.errorProvider = errorProvider
         self.completion = completion
         self.delegate = channelInboundHandlerDelegate
-        self.logger = logger
+        self.invocationReporting = invocationReporting
     }
 
     /**
@@ -104,6 +104,7 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
      */
     public func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let responsePart = self.unwrapInboundIn(data)
+        let logger = invocationReporting.logger
 
         switch responsePart {
         // This is the response head
@@ -146,6 +147,8 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
      Handles when the response has been completely received.
      */
     func handleCompleteResponse(context: ChannelHandlerContext, bodyData: Data?) {
+        let logger = invocationReporting.logger
+        
         // always close the channel context after the processing in this method
         defer {
             logger.debug("Closing channel on complete response.")
@@ -157,7 +160,8 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
 
         // ensure the response head from received
         guard let responseHead = responseHead else {
-            let error = HTTPError.badResponse("Response head was not received")
+            let cause = HTTPError.badResponse("Response head was not received")
+            let error = HTTPClientError(responseCode: 400, cause: cause)
 
             logger.error("Response head was not received")
 
@@ -194,18 +198,20 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
         }
 
         // Handle client delegated errors
-        if let error = delegate.handleErrorResponses(responseHead: responseHead, responseBodyData: bodyData) {
+        if let error = delegate.handleErrorResponses(responseHead: responseHead, responseBodyData: bodyData, invocationReporting: invocationReporting) {
             completion(.failure(error))
             return
         }
 
-        let responseError: Error
+        let responseError: HTTPClientError
         do {
             // attempt to get the error from the provider
-            responseError = try errorProvider(responseHead, responseComponents)
+            responseError = try errorProvider(responseHead, responseComponents, invocationReporting)
+        } catch let error as HTTPClientError {
+            responseError = error
         } catch {
             // if the provider throws an error, use this error
-            responseError = error
+            responseError = HTTPClientError(responseCode: 400, cause: error)
         }
 
         // complete with the error
@@ -216,6 +222,8 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
      Called when notifying about a connection error.
      */
     public func errorCaught(context: ChannelHandlerContext, error: Error) {
+        let logger = invocationReporting.logger
+        
         logger.debug("Error received from HTTP connection: \(String(describing: error))")
 
         // close the channel
@@ -226,8 +234,10 @@ public final class HTTPClientChannelInboundHandler: ChannelInboundHandler {
      Called when the channel becomes active.
      */
     public func channelActive(context: ChannelHandlerContext) {
+        let logger = invocationReporting.logger
+        
         logger.debug("Preparing request on channel active.")
-        var headers = delegate.addClientSpecificHeaders(handler: self)
+        var headers = delegate.addClientSpecificHeaders(handler: self, invocationReporting: invocationReporting)
 
         // TODO: Move headers out to HTTPClient for UrlRequest
         if bodyData.count > 0 || delegate.specifyContentHeadersForZeroLengthBody {
